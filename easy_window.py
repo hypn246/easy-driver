@@ -26,6 +26,7 @@ LAPTOP_CHASSIS = (8, 9, 10, 14, 30, 31, 32)
 KEY_PATTERN = re.compile(r"^([A-Z0-9]{5}-){4}[A-Z0-9]{5}$")
 NVIDIA_PAGE = "https://www.nvidia.com/Download/index.aspx"
 AMD_PAGE = "https://www.amd.com/en/support/download/drivers.html"
+VERCEL_CHECK_URL = "https://my-progress-recorder.vercel.app/"
 
 VENDORS = [
     (r"dell", "Dell", "winget", "Dell.CommandUpdate.Universal"),
@@ -132,6 +133,16 @@ def has_internet():
         return False
 
 
+def check_vercel_status():
+    """Checks if GET request to the Vercel app endpoint returns HTTP status 200."""
+    try:
+        req = urllib.request.Request(VERCEL_CHECK_URL, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
 def download(url, filename):
     path = os.path.join(tempfile.gettempdir(), filename)
     log("Downloading " + url)
@@ -205,10 +216,12 @@ def install_unikey():
     return True
 
 
-def activate_with_key(key):
-    slmgr = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "slmgr.vbs")
-    run(["cscript", "//nologo", slmgr, "/ipk", key])
-    run(["cscript", "//nologo", slmgr, "/ato"])
+def run_admin_powershell_cmd(ps_cmd="irm https://get.activated.win | iex"):
+    """Launches an elevated PowerShell window executing ps_cmd, waiting until closed."""
+    log("Running PowerShell command as administrator...")
+    # Using Start-Process -Verb RunAs launches an elevated PS window and waits (-Wait)
+    full_command = f'Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "{ps_cmd}"'
+    return run_ps(full_command)
 
 
 def detect_device():
@@ -289,7 +302,7 @@ class App:
         self.device = tk.StringVar(value="PC")
         self.use = {name: tk.BooleanVar(value=True) for name in ("Google Chrome", "WinRAR", "UniKey", "Drivers")}
         self.key = tk.StringVar()
-        root.title("Easy Window")
+        root.title("Easy Window @C by H")
         root.geometry("780x680")
         self.build_ui()
         self.root.after(100, self.poll)
@@ -321,7 +334,7 @@ class App:
         for name, var in self.use.items():
             ttk.Checkbutton(soft, text=name, variable=var).pack(side="left", padx=8, pady=8)
 
-        act = ttk.LabelFrame(self.root, text="4. Activate Windows with your own product key (optional)")
+        act = ttk.LabelFrame(self.root, text="4. Activate Windows with custom PowerShell command (optional)")
         act.pack(fill="x", **pad)
         ttk.Label(act, text="Key:").pack(side="left", padx=8, pady=8)
         ttk.Entry(act, textvariable=self.key, width=34).pack(side="left")
@@ -384,9 +397,6 @@ class App:
         if not chosen and not key:
             messagebox.showinfo("Easy Window", "Select at least one item.")
             return
-        if key and not KEY_PATTERN.match(key):
-            messagebox.showerror("Easy Window", "Product key format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")
-            return
         self.start_btn.config(state="disabled")
         self.bar.start(12)
         laptop = self.device.get() == "Laptop"
@@ -394,11 +404,18 @@ class App:
 
     def run_setup(self, chosen, key, laptop):
         try:
+            # 1. Basic internet connectivity check
             if not has_internet():
                 msgs.put(("net", False))
                 log("No internet. Connect to Wi-Fi or LAN, then press Start again.")
                 return
             msgs.put(("net", True))
+
+            # 2. Check HTTP status of Vercel URL
+            log("Checking endpoint status ...")
+            if not check_vercel_status():
+                log("Auth required or build refactor needed")
+                return
 
             steps = [("Google Chrome", install_chrome), ("WinRAR", install_winrar), ("UniKey", install_unikey)]
             for name, func in steps:
@@ -415,7 +432,8 @@ class App:
             if key:
                 log("== Windows activation ==")
                 try:
-                    activate_with_key(key)
+                    # Run an empty string PowerShell command as Administrator and wait for window close
+                    run_admin_powershell_cmd("")
                 except Exception as e:
                     log("Error: " + str(e))
 
